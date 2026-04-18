@@ -8611,6 +8611,7 @@ class AIAgent:
         self._incomplete_scratchpad_retries = 0
         self._codex_incomplete_retries = 0
         self._thinking_prefill_retries = 0
+        self._verification_gate_retries = 0
         self._post_tool_empty_retried = False
         self._last_content_with_tools = None
         self._last_content_tools_all_housekeeping = False

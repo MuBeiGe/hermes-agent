@@ -37,7 +37,7 @@ from tools.registry import tool_error
 logger = logging.getLogger(__name__)
 
 _DEFAULT_ENDPOINT = "http://127.0.0.1:1933"
-_TIMEOUT = 30.0
+_TIMEOUT = 5.0
 
 
 # ---------------------------------------------------------------------------
