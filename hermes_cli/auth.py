@@ -412,6 +412,13 @@ def _resolve_api_key_provider_secret(
         if has_usable_secret(val):
             return val, env_var
 
+    # Custom providers: check key_env from config (e.g. siliconflow)
+    key_env = pconfig.extra.get("key_env", "") if pconfig.extra else ""
+    if key_env:
+        val = os.getenv(key_env, "").strip()
+        if has_usable_secret(val):
+            return val, key_env
+
     return "", ""
 
 
