@@ -2238,13 +2238,6 @@ class GatewayRunner:
                         # be garbage-collected.  Otherwise the cache grows
                         # unbounded across the gateway's lifetime.
                         self._evict_cached_agent(key)
-                        # Mark the session as ended in SQLite so end_reason
-                        # is populated (idempotent — WHERE ended_at IS NULL).
-                        if self._session_db is not None:
-                            try:
-                                self._session_db.end_session(entry.session_id, "gateway_expire")
-                            except Exception:
-                                pass
                         # Mark as finalized and persist to disk so the flag
                         # survives gateway restarts.
                         with self.session_store._lock:
@@ -4656,12 +4649,6 @@ class GatewayRunner:
                     "Auto-resetting session %s after compression exhaustion.",
                     session_entry.session_id,
                 )
-                # End the old session before creating the new one.
-                if self._session_db is not None:
-                    try:
-                        self._session_db.end_session(session_entry.session_id, "gateway_reset")
-                    except Exception:
-                        pass
                 self.session_store.reset_session(session_key)
                 self._evict_cached_agent(session_key)
                 self._session_model_overrides.pop(session_key, None)
@@ -4913,24 +4900,7 @@ class GatewayRunner:
         # Snapshot the old entry so on_session_finalize can report the
         # expiring session id before reset_session() rotates it.
         old_entry = self.session_store._entries.get(session_key)
-        
-        # Flush memories in the background (fire-and-forget) so the user
-        # gets the "Session reset!" response immediately.
-        try:
-            if old_entry:
-                _flush_task = asyncio.create_task(
-                    self._async_flush_memories(old_entry.session_id, session_key)
-                )
-                self._background_tasks.add(_flush_task)
-                _flush_task.add_done_callback(self._background_tasks.discard)
-        except Exception as e:
-            logger.debug("Gateway memory flush on reset failed: %s", e)
-        # End the old session in SQLite before resetting so end_reason is set.
-        if old_entry and self._session_db is not None:
-            try:
-                self._session_db.end_session(old_entry.session_id, "gateway_reset")
-            except Exception:
-                pass
+
         # Close tool resources on the old agent (terminal sandboxes, browser
         # daemons, background processes) before evicting from cache.
         # Guard with getattr because test fixtures may skip __init__.
