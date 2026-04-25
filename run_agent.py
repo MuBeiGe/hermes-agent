@@ -1716,6 +1716,13 @@ class AIAgent:
         if not isinstance(_compression_cfg, dict):
             _compression_cfg = {}
         compression_threshold = float(_compression_cfg.get("threshold", 0.50))
+        # Per-model threshold overrides: some models benefit from later compression
+        _model_threshold_overrides = _compression_cfg.get("model_thresholds", {})
+        if isinstance(_model_threshold_overrides, dict):
+            for _pattern, _thr in _model_threshold_overrides.items():
+                if isinstance(_thr, (int, float)) and self.model and _pattern in self.model:
+                    compression_threshold = float(_thr)
+                    break
         compression_enabled = str(_compression_cfg.get("enabled", True)).lower() in ("true", "1", "yes")
         compression_target_ratio = float(_compression_cfg.get("target_ratio", 0.20))
         compression_protect_last = int(_compression_cfg.get("protect_last_n", 20))
@@ -7420,6 +7427,9 @@ class AIAgent:
             or base_url_host_matches(self.base_url, "moonshot.ai")
             or base_url_host_matches(self.base_url, "moonshot.cn")
         )
+        _is_deepseek = (
+            base_url_host_matches(self.base_url, "api.deepseek.com")
+        )
 
         # Temperature: _fixed_temperature_for_model may return OMIT_TEMPERATURE
         # sentinel (temperature omitted entirely), a numeric override, or None.
@@ -7488,6 +7498,7 @@ class AIAgent:
             is_github_models=_is_gh,
             is_nvidia_nim=_is_nvidia,
             is_kimi=_is_kimi,
+            is_deepseek=_is_deepseek,
             is_custom_provider=self.provider == "custom",
             ollama_num_ctx=self._ollama_num_ctx,
             provider_preferences=_prefs or None,
@@ -10761,6 +10772,26 @@ class AIAgent:
                     self._vprint(f"{self.log_prefix}   🔌 Provider: {_provider}  Model: {_model}", force=True)
                     self._vprint(f"{self.log_prefix}   🌐 Endpoint: {_base}", force=True)
                     self._vprint(f"{self.log_prefix}   📝 Error: {_error_summary}", force=True)
+
+                    # ── Patch: API error awareness injection (2026-04-26) ──
+                    # Inject error summary as user message so the model knows
+                    # what happened and can adapt its strategy. This covers ALL
+                    # error types, complementing the existing specific injections
+                    # for rate_limit (L10723) and context_overflow (L10681).
+                    if not getattr(api_error, '_error_injected_sent', False):
+                        _err_inject_msg = (
+                            f"[System] API call failed: {_error_summary} "
+                            f"(type={error_type}, retryable={getattr(classified, 'retryable', '?')}). "
+                            f"Provider: {_provider} | Model: {_model}."
+                        )
+                        messages.append({
+                            "role": "user",
+                            "content": _err_inject_msg,
+                            "_error_injected": True,
+                        })
+                        api_error._error_injected_sent = True
+                    # ── End Patch ──
+
                     if status_code and status_code < 500:
                         _err_body = getattr(api_error, "body", None)
                         _err_body_str = str(_err_body)[:300] if _err_body else None
@@ -10864,6 +10895,20 @@ class AIAgent:
                                     f"🗜️ Context reduced to {_reduced_ctx:,} tokens "
                                     f"(was {old_ctx:,}), retrying..."
                                 )
+                                # ── Patch: context reduction awareness (2026-04-23) ──
+                                # Model needs to know context was compressed so it
+                                # avoids generating oversized responses again.
+                                messages.append({
+                                    "role": "user",
+                                    "content": (
+                                        f"[System] Context window exceeded. "
+                                        f"Compressed {original_len} → {len(messages)} messages "
+                                        f"and reduced context to {_reduced_ctx:,} tokens "
+                                        f"(was {old_ctx:,}). Be more concise, break large "
+                                        f"tasks into smaller steps, or use shorter tool calls."
+                                    ),
+                                    "_error_injected": True,
+                                })
                                 time.sleep(2)
                                 restart_with_compressed_messages = True
                                 break
@@ -10891,6 +10936,21 @@ class AIAgent:
                                 retry_count = 0
                                 compression_attempts = 0
                                 primary_recovery_attempted = False
+                                # ── Patch: API error awareness (2026-04-23) ──
+                                # The model was about to receive a rate limit error.
+                                # Inject awareness so it can adjust strategy (reduce
+                                # frequency, consolidate requests, compress history).
+                                _fb_provider = getattr(self, 'provider', '?')
+                                messages.append({
+                                    "role": "user",
+                                    "content": (
+                                        f"[System] Rate limited by provider (HTTP 429). "
+                                        f"Switched to {_fb_provider}. To prevent this: "
+                                        f"consolidate requests, reduce tool call frequency, "
+                                        f"or use more concise prompts."
+                                    ),
+                                    "_error_injected": True,
+                                })
                                 continue
 
                     # ── Nous Portal: record rate limit & skip retries ─────
@@ -12163,6 +12223,89 @@ class AIAgent:
                     messages.append(final_msg)
                     
                     _turn_exit_reason = f"text_response(finish_reason={finish_reason})"
+
+                    # ── Task-state guard: prevent "markdown summary → break" exits ──
+                    # If the agent has pending/in-progress todo items, do NOT allow
+                    # a normal text-only exit.  Force the loop to continue so the
+                    # agent keeps executing tasks instead of writing a "done" report.
+                    # [Escape Valve 2026-04-11] 连续拦截≥3次时强制释放，防止死锁
+                    if not hasattr(self, '_guard_consecutive_blocks'):
+                        self._guard_consecutive_blocks = 0
+                    _active_tasks = [
+                        t for t in self._todo_store.read()
+                        if t.get("status") in ("pending", "in_progress")
+                    ] if self._todo_store else []
+                    if _active_tasks:
+                        self._guard_consecutive_blocks += 1
+                        _diag_log = logging.getLogger("run_agent.diagnostic")
+                        _diag_log.setLevel(logging.DEBUG)
+                        if self._guard_consecutive_blocks >= 3:
+                            _diag_log.warning(
+                                "Guard escape valve triggered after %d consecutive blocks. Releasing.",
+                                self._guard_consecutive_blocks,
+                            )
+                            self._guard_consecutive_blocks = 0
+                            # Fall through to normal exit
+                        else:
+                            _diag_log.warning(
+                                "Blocked normal exit: %d active task(s) remain. Forcing continue. (block #%d)",
+                                len(_active_tasks), self._guard_consecutive_blocks,
+                            )
+                            messages.append({
+                                "role": "system",
+                                "content": (
+                                    "[System Override] 你有 %d 个未完成任务，禁止输出总结。"
+                                    "立即调用工具执行下一个任务。" % len(_active_tasks)
+                                ),
+                            })
+                            continue
+                    else:
+                        self._guard_consecutive_blocks = 0
+                    # ── End task-state guard ──
+
+                    # ── Budget guard: prevent premature exit ──
+                    # If we've barely made any API calls and got a tiny response,
+                    # this is likely a premature exit (model gave up too early).
+                    # [Budget Guard 2026-04-11] with escape valve
+                    if not hasattr(self, '_budget_guard_blocks'):
+                        self._budget_guard_blocks = 0
+                    if (
+                        api_call_count < max(10, int(self.max_iterations * 0.3))
+                        and final_response
+                        and len(final_response) < 100
+                    ):
+                        self._budget_guard_blocks += 1
+                        _diag_log = logging.getLogger("run_agent.diagnostic")
+                        if self._budget_guard_blocks >= 3:
+                            _diag_log.warning(
+                                "Budget Guard escape valve: released after %d consecutive blocks. "
+                                "api_calls=%d response_len=%d",
+                                self._budget_guard_blocks, api_call_count, len(final_response),
+                            )
+                            self._budget_guard_blocks = 0
+                            # Fall through to normal exit
+                        else:
+                            _diag_log.warning(
+                                "Budget Guard triggered (block #%d): only %d API call(s) with %d-char response. "
+                                "Forcing continue to prevent premature exit.",
+                                self._budget_guard_blocks, api_call_count, len(final_response),
+                            )
+                            # Pop the tiny response and inject continue prompt
+                            if messages and messages[-1].get("role") == "assistant":
+                                messages.pop()
+                            messages.append({
+                                "role": "system",
+                                "content": (
+                                    "[System Override] 你的回复太短（%d字符），且API调用次数极少（%d/%d）。"
+                                    "这可能是过早退出。请继续执行任务，不要输出总结。"
+                                    % (len(final_response), api_call_count, self.max_iterations)
+                                ),
+                            })
+                            continue
+                    else:
+                        self._budget_guard_blocks = 0
+                    # ── End budget guard ──
+
                     if not self.quiet_mode:
                         self._safe_print(f"🎉 Conversation completed after {api_call_count} OpenAI-compatible API call(s)")
                     break
@@ -12249,10 +12392,35 @@ class AIAgent:
         # Persist session to both JSON log and SQLite
         self._persist_session(messages, conversation_history)
 
+        # ── Patch: end_reason guard (2026-04-23) ────────────────────────
+        # root cause: run_conversation exit paths never call end_session(),
+        # so ended_at/end_reason stay NULL for every normally-completed session.
+        # Only compression (L7410) set end_reason — all others were orphans.
+        #
+        # Fix: set end_reason for CHILD sessions only (delegate_task subsessions).
+        # Root sessions (CLI/gateway) reuse the same AIAgent across multiple
+        # run_conversation calls — ending the session mid-conversation would
+        # leave it in a semantically inconsistent state (ended_at set but
+        # still receiving messages).  Root session lifecycle is managed by
+        # CLI atexit/gateway reset+expire.
+        #
+        # end_session uses WHERE ended_at IS NULL, so compression sessions
+        # keep their "compression" reason and are not overwritten.
+        if self._session_db and self.session_id and self._parent_session_id:
+            try:
+                self._session_db.end_session(self.session_id, _turn_exit_reason)
+            except Exception:
+                pass  # best-effort; must not break the return path
+
         # ── Turn-exit diagnostic log ─────────────────────────────────────
         # Always logged at INFO so agent.log captures WHY every turn ended.
         # When the last message is a tool result (agent was mid-work), log
         # at WARNING — this is the "just stops" scenario users report.
+        # Use a dedicated diagnostic logger to bypass quiet_mode's
+        # setLevel(ERROR) suppression on the 'run_agent' logger.
+        # This ensures agent.log always captures turn-exit reasons.
+        _diag_logger = logging.getLogger("run_agent.diagnostic")
+        _diag_logger.setLevel(logging.DEBUG)  # Override parent's ERROR suppression
         _last_msg_role = messages[-1].get("role") if messages else None
         _last_tool_name = None
         if _last_msg_role == "tool":

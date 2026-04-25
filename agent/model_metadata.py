@@ -164,6 +164,8 @@ DEFAULT_CONTEXT_LENGTHS = {
     "gemma": 8192,  # fallback for older gemma models
     # DeepSeek
     "deepseek": 128000,
+    "deepseek-v4-pro": 131072,    # V4 Pro — 128K context + thinking
+    "deepseek-v4-flash": 131072,  # V4 Flash — 128K context
     # Meta
     "llama": 131072,
     # Qwen — specific model families before the catch-all.

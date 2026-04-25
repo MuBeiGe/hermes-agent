@@ -757,6 +757,17 @@ def _run_cleanup():
             )
     except Exception:
         pass
+    # ── Patch: end_reason for root session on CLI exit (2026-04-23) ──
+    # Covers Ctrl+D, kill, and unhandled exceptions.  /exit already calls
+    # end_session("cli_close") — the WHERE ended_at IS NULL guard makes
+    # this idempotent so a second call is a safe no-op.
+    try:
+        _db = getattr(_active_agent_ref, '_session_db', None)
+        _sid = getattr(_active_agent_ref, 'session_id', None)
+        if _db and _sid:
+            _db.end_session(_sid, "cli_exit")
+    except Exception:
+        pass
 
 
 # =============================================================================

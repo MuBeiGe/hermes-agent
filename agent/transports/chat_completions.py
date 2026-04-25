@@ -100,6 +100,7 @@ class ChatCompletionsTransport(ProviderTransport):
             is_github_models: bool
             is_nvidia_nim: bool
             is_kimi: bool
+            is_deepseek: bool
             is_custom_provider: bool
             ollama_num_ctx: int | None
             # Provider routing
@@ -187,6 +188,7 @@ class ChatCompletionsTransport(ProviderTransport):
         anthropic_max_out = params.get("anthropic_max_output")
         is_nvidia_nim = params.get("is_nvidia_nim", False)
         is_kimi = params.get("is_kimi", False)
+        is_deepseek = params.get("is_deepseek", False)
         reasoning_config = params.get("reasoning_config")
 
         if ephemeral is not None and max_tokens_fn:
@@ -238,6 +240,18 @@ class ChatCompletionsTransport(ProviderTransport):
             extra_body["thinking"] = {
                 "type": "enabled" if _kimi_thinking_enabled else "disabled",
             }
+
+        # DeepSeek V4-Pro: thinking mode + reasoning_effort
+        if is_deepseek:
+            _ds_thinking_enabled = True
+            if reasoning_config and isinstance(reasoning_config, dict):
+                if reasoning_config.get("enabled") is False:
+                    _ds_thinking_enabled = False
+            extra_body["thinking"] = {
+                "type": "enabled" if _ds_thinking_enabled else "disabled",
+            }
+            if _ds_thinking_enabled:
+                api_kwargs["reasoning_effort"] = "high"
 
         # Reasoning
         if params.get("supports_reasoning", False):

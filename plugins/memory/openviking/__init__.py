@@ -434,7 +434,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
                     "content": assistant_content[:4000],
                 })
             except Exception as e:
-                logger.debug("OpenViking sync_turn failed: %s", e)
+                logger.warning("OpenViking sync_turn failed: %s", e)
 
         # Wait for any previous sync to finish before starting a new one
         if self._sync_thread and self._sync_thread.is_alive():
@@ -489,7 +489,7 @@ class OpenVikingMemoryProvider(MemoryProvider):
                     ],
                 })
             except Exception as e:
-                logger.debug("OpenViking memory mirror failed: %s", e)
+                logger.warning("OpenViking memory mirror failed: %s", e)
 
         t = threading.Thread(target=_write, daemon=True, name="openviking-memwrite")
         t.start()
