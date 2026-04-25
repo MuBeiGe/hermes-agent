@@ -2238,7 +2238,13 @@ class GatewayRunner:
                         # be garbage-collected.  Otherwise the cache grows
                         # unbounded across the gateway's lifetime.
                         self._evict_cached_agent(key)
-                        # Mark as finalized and persist to disk so the flag
+                        # Mark the session as ended in SQLite so end_reason
+                        # is populated (idempotent — WHERE ended_at IS NULL).
+                        if self._session_db is not None:
+                            try:
+                                self._session_db.end_session(entry.session_id, "gateway_expire")
+                            except Exception:
+                                pass
                         # survives gateway restarts.
                         with self.session_store._lock:
                             entry.expiry_finalized = True
@@ -4651,6 +4657,12 @@ class GatewayRunner:
                 )
                 self.session_store.reset_session(session_key)
                 self._evict_cached_agent(session_key)
+                # End the old session before creating the new one.
+                if self._session_db is not None:
+                    try:
+                        self._session_db.end_session(session_entry.session_id, "gateway_reset")
+                    except Exception:
+                        pass
                 self._session_model_overrides.pop(session_key, None)
                 response = (response or "") + (
                     "\n\n🔄 Session auto-reset — the conversation exceeded the "
@@ -4912,6 +4924,12 @@ class GatewayRunner:
             if _old_agent is not None:
                 self._cleanup_agent_resources(_old_agent)
         self._evict_cached_agent(session_key)
+        # End the old session in SQLite before resetting so end_reason is set.
+        if old_entry and self._session_db is not None:
+            try:
+                self._session_db.end_session(old_entry.session_id, "gateway_reset")
+            except Exception:
+                pass
 
         try:
             from tools.env_passthrough import clear_env_passthrough
