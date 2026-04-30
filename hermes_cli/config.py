@@ -93,6 +93,7 @@ _EXTRA_ENV_KEYS = frozenset({
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
     "LANGFUSE_BASE_URL",
+    "MIMO_API_KEY", "XIAOMIMIMO_API_KEY",
 })
 import yaml
 

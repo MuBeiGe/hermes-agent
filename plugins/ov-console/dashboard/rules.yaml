@@ -1,0 +1,244 @@
+# OV 资源库 Dashboard 插件 · 声明式规则
+# 机器可读。verify.sh 和 auto-heal.sh 读取此文件执行合规检查。
+# 格式：每个规则包含 id, check (检查方式), expect (期望值), heal (修复策略)
+
+version: "1.0"
+plugin: ov-console
+
+# ═══════════════════════════════════════════════════════════
+# 一、文件完整性
+# ═══════════════════════════════════════════════════════════
+files:
+  - id: manifest-exists
+    path: dashboard/manifest.json
+    expect: exists
+    heal: recreate
+
+  - id: backend-exists
+    path: dashboard/plugin_api.py
+    expect: exists
+    heal: manual  # 无法自动重建
+
+  - id: frontend-exists
+    path: dashboard/dist/index.js
+    expect: exists
+    heal: manual
+
+  - id: rules-exist
+    path: dashboard/RULES.md
+    expect: exists
+    heal: manual
+
+  - id: rules-yaml-exist
+    path: dashboard/rules.yaml
+    expect: exists
+    heal: manual
+
+# ═══════════════════════════════════════════════════════════
+# 二、语法正确性
+# ═══════════════════════════════════════════════════════════
+syntax:
+  - id: python-syntax
+    file: dashboard/plugin_api.py
+    check: "python3 -m py_compile {file}"
+    expect: exit_code == 0
+    heal: manual  # 语法错误需人工修复
+
+  - id: node-syntax
+    file: dashboard/dist/index.js
+    check: "node --check {file}"
+    expect: exit_code == 0
+    heal: manual
+
+# ═══════════════════════════════════════════════════════════
+# 三、服务可达性
+# ═══════════════════════════════════════════════════════════
+services:
+  - id: dashboard-up
+    url: http://127.0.0.1:9119/api/dashboard/plugins
+    expect: status == 200 AND body contains "ov-console"
+    heal: restart_dashboard
+
+  - id: ov-server-up
+    url: http://127.0.0.1:1933/health
+    expect: status == 200 AND body.healthy == true
+    heal: restart_ov_server
+
+  - id: ov-server-health
+    url: http://127.0.0.1:1933/api/v1/system/status
+    expect: status == 200 AND body.result.initialized == true
+    heal: restart_ov_server
+
+# ═══════════════════════════════════════════════════════════
+# 四、API 端点（已实现路由 — 必须全部 200）
+# ═══════════════════════════════════════════════════════════
+api_routes:
+  implemented:
+    - id: health
+      method: GET
+      path: /api/plugins/ov-console/health
+      expect: status == 200 AND body.status exists
+
+    - id: system-status
+      method: GET
+      path: /api/plugins/ov-console/system/status
+      expect: status == 200 AND body.result.initialized == true
+
+    - id: capabilities
+      method: GET
+      path: /api/plugins/ov-console/capabilities
+      expect: status == 200
+
+    - id: fs-tree
+      method: GET
+      path: /api/plugins/ov-console/fs/tree
+      expect: status == 200 AND body starts with "{"
+
+    - id: fs-stat
+      method: GET
+      path: /api/plugins/ov-console/fs/stat?uri=viking://agent
+      expect: status == 200 AND body.result.uri exists
+
+    - id: content-read
+      method: GET
+      path: /api/plugins/ov-console/content/read?uri=viking://agent&mode=abstract
+      expect: status == 200
+
+    - id: search-find
+      method: POST
+      path: /api/plugins/ov-console/search
+      body: {"query":"test","limit":1}
+      expect: status == 200 AND body.total exists
+
+    - id: sessions-create
+      method: POST
+      path: /api/plugins/ov-console/sessions
+      body: {}
+      expect: status == 200 AND body.result.session_id exists
+
+    - id: admin-accounts
+      method: GET
+      path: /api/plugins/ov-console/admin/accounts
+      expect: status == 200
+
+  # Phase 1 新增路由 — 允许 404（尚不存在）
+  planned:
+    - id: search-grep
+      method: POST
+      path: /api/plugins/ov-console/search/grep
+      body: {"uri":"viking://agent","pattern":"test"}
+      expect: status != 502  # 允许 404/405，但不允许代理层报错
+
+    - id: search-glob
+      method: POST
+      path: /api/plugins/ov-console/search/glob
+      body: {"pattern":"*.md"}
+      expect: status != 502
+
+    - id: sessions-list
+      method: GET
+      path: /api/plugins/ov-console/sessions
+      expect: status != 502
+
+    - id: relations-get
+      method: GET
+      path: /api/plugins/ov-console/relations?uri=viking://agent
+      expect: status != 502
+
+    - id: relations-link
+      method: POST
+      path: /api/plugins/ov-console/relations/link
+      body: {"from_uri":"viking://agent","to_uris":"viking://test","reason":"test"}
+      expect: status != 502
+
+    - id: feedback
+      method: POST
+      path: /api/plugins/ov-console/feedback
+      body: {"uri":"viking://agent","outcome":"success"}
+      expect: status != 502
+
+    - id: observer
+      method: GET
+      path: /api/plugins/ov-console/observer/system
+      expect: status != 502
+
+    - id: export
+      method: POST
+      path: /api/plugins/ov-console/export
+      body: {"uri":"viking://agent"}
+      expect: status != 502
+
+# ═══════════════════════════════════════════════════════════
+# 五、性能基线
+# ═══════════════════════════════════════════════════════════
+performance:
+  baseline_file: /home/byyg/.hermes/workspace/ov-console-perf-baseline.txt
+  threshold: 3.0  # 超过基线 N 倍视为异常
+  endpoints:
+    - id: system-status-perf
+      path: /api/plugins/ov-console/system/status
+      baseline_ms: 8
+
+    - id: fs-tree-perf
+      path: /api/plugins/ov-console/fs/tree
+      baseline_ms: 100
+
+    - id: fs-stat-perf
+      path: /api/plugins/ov-console/fs/stat?uri=viking://agent
+      baseline_ms: 10
+
+    - id: content-read-perf
+      path: /api/plugins/ov-console/content/read?uri=viking://agent&mode=abstract
+      baseline_ms: 10
+
+# ═══════════════════════════════════════════════════════════
+# 六、自治修复策略
+# ═══════════════════════════════════════════════════════════
+heal_strategies:
+  restart_dashboard:
+    description: "重启 Hermes Dashboard 进程"
+    command: |
+      pkill -f "hermes dashboard" 2>/dev/null
+      sleep 2
+      cd ~/.hermes/hermes-agent && \
+        nohup venv/bin/hermes dashboard --tui --no-open --port 9119 --host 127.0.0.1 \
+        > ~/.hermes/logs/dashboard.log 2>&1 &
+      sleep 3
+    verify: "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9119/api/dashboard/plugins"
+    verify_expect: "200"
+
+  restart_ov_server:
+    description: "重启 OV Server"
+    command: |
+      pkill -f "openviking.server" 2>/dev/null
+      sleep 2
+      cd /home/byyg/openviking_env && \
+        nohup bin/openviking server --host 127.0.0.1 --port 1933 \
+        > ~/.hermes/logs/ov-server.log 2>&1 &
+      sleep 3
+    verify: "curl -s http://127.0.0.1:1933/health | python3 -c \"import sys,json; print(json.load(sys.stdin).get('healthy'))\""
+    verify_expect: "True"
+
+  restart_ov_server:
+    description: "重启 OV Server"
+    command: |
+      pkill -f "openviking.server" 2>/dev/null
+      sleep 3
+      find /home/byyg/.openviking/data/ -name 'LOCK*' -delete 2>/dev/null
+      export LITELLM_LOCAL_MODEL_COST_MAP=true
+      nohup /home/byyg/openviking_env/bin/python -m openviking.server --port 1933 \
+        > /tmp/ov-server.log 2>&1 &
+      sleep 8
+    verify: "curl -s -o /dev/null -w '%{http_code}' -H 'x-api-key: L0kAJzPLpSDopOT7KRAcGdEVm-KsSK4h08_Y5p4z9fY' http://127.0.0.1:1933/api/v1/system/status"
+    verify_expect: "200"
+
+# ═══════════════════════════════════════════════════════════
+# 七、巡检策略
+# ═══════════════════════════════════════════════════════════
+monitoring:
+  interval: "0 * * * *"  # 每小时
+  max_heal_retries: 3
+  cooldown_minutes: 30  # 同类型修复冷却期
+  alert_on:
+    - heal_failed       # 修复失败
+    - consecutive_fail  # 连续 3 次检测失败

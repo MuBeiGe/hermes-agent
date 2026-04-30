@@ -106,13 +106,19 @@ class _VikingClient:
         return f"{self._endpoint}{path}"
 
     def get(self, path: str, **kwargs) -> dict:
-        resp = self._httpx.get(
-            self._url(path), headers=self._headers(), timeout=_TIMEOUT, **kwargs
-        )
+        url = self._url(path)
+        headers = self._headers()
+        logger.warning("OV GET %s headers_keys=%s api_key_prefix=%s", path, list(headers.keys()), headers.get("X-API-Key","")[:8] if headers.get("X-API-Key") else "NONE")
+        resp = self._httpx.get(url, headers=headers, timeout=_TIMEOUT, **kwargs)
+        if resp.status_code == 401:
+            logger.error("OV 401 on GET %s — key_present=%s key_len=%s", path, bool(self._api_key), len(self._api_key) if self._api_key else 0)
         resp.raise_for_status()
         return resp.json()
 
     def post(self, path: str, payload: dict = None, **kwargs) -> dict:
+        url = self._url(path)
+        headers = self._headers()
+        logger.warning("OV POST %s headers_keys=%s api_key_prefix=%s", path, list(headers.keys()), headers.get("X-API-Key","")[:8] if headers.get("X-API-Key") else "NONE")
         resp = self._httpx.post(
             self._url(path), json=payload or {}, headers=self._headers(),
             timeout=_TIMEOUT, **kwargs

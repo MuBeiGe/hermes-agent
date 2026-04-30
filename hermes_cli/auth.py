@@ -538,6 +538,18 @@ def _resolve_api_key_provider_secret(
     except Exception:
         pass
 
+    # Fallback: try credential_pool (auth.json) when env var is missing.
+    # This ensures API keys work even if .env wasn't loaded into os.environ
+    # (e.g., session started before key was added to .env).
+    try:
+        pool_entries = read_credential_pool(provider_id)
+        for entry in pool_entries:
+            token = entry.get("access_token", "")
+            if has_usable_secret(token):
+                return token, f"credential_pool:{entry.get('id', 'unknown')}"
+    except Exception:
+        pass  # credential_pool unavailable — don't break auth
+
     return "", ""
 
 

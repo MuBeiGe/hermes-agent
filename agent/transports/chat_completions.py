@@ -184,6 +184,7 @@ class ChatCompletionsTransport(ProviderTransport):
             is_kimi: bool
             is_deepseek: bool
             is_lmstudio: bool
+            is_minimax: bool
             is_custom_provider: bool
             ollama_num_ctx: int | None
             # Provider routing
@@ -234,10 +235,24 @@ class ChatCompletionsTransport(ProviderTransport):
             sanitized = list(sanitized)
             sanitized[0] = {**sanitized[0], "role": "developer"}
 
+        # MiniMax: extract system message (its /v1 endpoint rejects role=system in messages array)
+        is_minimax = params.get("is_minimax", False)
+        minimax_system = None
+        if is_minimax and sanitized:
+            _clean: List[Dict[str, Any]] = []
+            for m in sanitized:
+                if isinstance(m, dict) and m.get("role") == "system":
+                    minimax_system = m.get("content", "")
+                    continue
+                _clean.append(m)
+            sanitized = _clean
+
         api_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": sanitized,
         }
+        if minimax_system is not None:
+            api_kwargs["system"] = minimax_system
 
         timeout = params.get("timeout")
         if timeout is not None:
@@ -365,7 +380,13 @@ class ChatCompletionsTransport(ProviderTransport):
                 "type": "enabled" if _ds_thinking_enabled else "disabled",
             }
             if _ds_thinking_enabled:
-                api_kwargs["reasoning_effort"] = "high"
+                api_kwargs["reasoning_effort"] = "max"   # DeepSeek supports high/max (max = full thinking)
+                # DeepSeek V4-Pro requires reasoning_content on ALL assistant messages
+                # when thinking mode is enabled. Inject empty string for messages
+                # that came from other providers (GLM) without this field.
+                for msg in sanitized:
+                    if isinstance(msg, dict) and msg.get("role") == "assistant":
+                        msg.setdefault("reasoning_content", "")
 
         # Reasoning. LM Studio is handled above via top-level reasoning_effort,
         # so skip emitting extra_body.reasoning for it.

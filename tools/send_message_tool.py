@@ -40,7 +40,7 @@ _PHONE_PLATFORMS = frozenset({"signal", "sms", "whatsapp"})
 _E164_TARGET_RE = re.compile(r"^\s*\+(\d{7,15})\s*$")
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".3gp"}
-_AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac"}
+_AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac", ".silk"}
 _VOICE_EXTS = {".ogg", ".opus"}
 # Telegram's Bot API sendAudio only accepts MP3 / M4A. Other audio
 # formats either route through sendVoice (Opus/OGG) or fall back to
@@ -588,6 +588,22 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
             last_result = result
         return last_result
 
+    # --- WeCom: use the adapter's media pipeline for voice/image/file ---
+    if platform == Platform.WECOM and media_files:
+        last_result = None
+        for i, chunk in enumerate(chunks):
+            is_last = (i == len(chunks) - 1)
+            result = await _send_wecom(
+                pconfig.extra,
+                chat_id,
+                chunk,
+                media_files=media_files if is_last else [],
+            )
+            if isinstance(result, dict) and result.get("error"):
+                return result
+            last_result = result
+        return last_result
+
     # --- Non-media platforms ---
     if media_files and not message.strip():
         return {
@@ -626,7 +642,7 @@ async def _send_to_platform(platform, pconfig, chat_id, message, thread_id=None,
         elif platform == Platform.FEISHU:
             result = await _send_feishu(pconfig, chat_id, chunk, thread_id=thread_id)
         elif platform == Platform.WECOM:
-            result = await _send_wecom(pconfig.extra, chat_id, chunk)
+            result = await _send_wecom(pconfig.extra, chat_id, chunk, media_files=media_files if is_last else [])
         elif platform == Platform.BLUEBUBBLES:
             result = await _send_bluebubbles(pconfig.extra, chat_id, chunk)
         elif platform == Platform.QQBOT:
@@ -1503,7 +1519,7 @@ async def _send_dingtalk(extra, chat_id, message):
         return _error(f"DingTalk send failed: {e}")
 
 
-async def _send_wecom(extra, chat_id, message):
+async def _send_wecom(extra, chat_id, message, media_files=None):
     """Send via WeCom using the adapter's WebSocket send pipeline."""
     try:
         from gateway.platforms.wecom import WeComAdapter, check_wecom_requirements
@@ -1520,10 +1536,26 @@ async def _send_wecom(extra, chat_id, message):
         if not connected:
             return _error(f"WeCom: failed to connect - {adapter.fatal_error_message or 'unknown error'}")
         try:
-            result = await adapter.send(chat_id, message)
-            if not result.success:
-                return _error(f"WeCom send failed: {result.error}")
-            return {"success": True, "platform": "wecom", "chat_id": chat_id, "message_id": result.message_id}
+            # Send text message first if present
+            if message.strip():
+                result = await adapter.send(chat_id, message)
+                if not result.success:
+                    return _error(f"WeCom send failed: {result.error}")
+
+            # Send media files
+            for media_path, _is_voice in media_files or []:
+                from pathlib import Path
+                ext = Path(media_path).suffix.lower()
+                if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
+                    result = await adapter.send_image(chat_id, media_path)
+                elif ext == ".amr":
+                    result = await adapter.send_voice(chat_id, media_path)
+                else:
+                    result = await adapter.send_document(chat_id, media_path)
+                if not result.success:
+                    return _error(f"WeCom media send failed: {result.error}")
+
+            return {"success": True, "platform": "wecom", "chat_id": chat_id}
         finally:
             await adapter.disconnect()
     except Exception as e:

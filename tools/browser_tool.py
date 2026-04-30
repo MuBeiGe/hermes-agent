@@ -1847,6 +1847,28 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         except Exception as e:
             logger.debug("Auto-snapshot after navigate failed: %s", e)
 
+        # Domain-specific hints — load from ~/.hermes/skills/domain/<site>/SKILL.md
+        try:
+            from urllib.parse import urlparse
+            hostname = urlparse(final_url).hostname or ""
+            site_name = hostname.removeprefix("www.").split(".")[0]
+            _domain_skill_path = Path.home() / ".hermes" / "skills" / "domain" / site_name / "SKILL.md"
+            if _domain_skill_path.is_file():
+                _hints = []
+                _in_section = False
+                for _line in _domain_skill_path.read_text(encoding="utf-8").splitlines():
+                    if _line.startswith("## 已知陷阱"):
+                        _in_section = True
+                        continue
+                    elif _line.startswith("## ") and _in_section:
+                        break
+                    elif _in_section and _line.strip().startswith("- "):
+                        _hints.append(_line.strip()[2:])
+                if _hints:
+                    response["domain_hints"] = _hints
+        except Exception as e:
+            logger.debug("Domain hints loading failed: %s", e)
+
         return json.dumps(response, ensure_ascii=False)
     else:
         return json.dumps({

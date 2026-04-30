@@ -361,8 +361,8 @@ def load_cli_config() -> Dict[str, Any]:
         },
         "delegation": {
             "max_iterations": 45,  # Max tool-calling turns per child agent
-            "model": "",       # Subagent model override (empty = inherit parent model)
-            "provider": "",    # Subagent provider override (empty = inherit parent provider)
+            "model": "",       # Subagent model (empty→inherit; config.yaml overrides this default)
+            "provider": "",    # Subagent provider (empty→inherit; config.yaml overrides this default)
             "base_url": "",    # Direct OpenAI-compatible endpoint for subagents
             "api_key": "",     # API key for delegation.base_url (falls back to OPENAI_API_KEY)
         },
@@ -5494,6 +5494,19 @@ class HermesCLI:
                 custom_provs=custom_provs,
             )
             return
+
+        # Load custom providers from config so user-defined providers
+        # (e.g. xiaomimimo) can be resolved via --provider flag.
+        if user_provs is None or custom_provs is None:
+            try:
+                from hermes_cli.config import get_compatible_custom_providers, load_config
+                cfg = load_config()
+                if user_provs is None:
+                    user_provs = cfg.get("providers")
+                if custom_provs is None:
+                    custom_provs = get_compatible_custom_providers(cfg)
+            except Exception:
+                pass
 
         # Perform the switch
         result = switch_model(

@@ -1,0 +1,719 @@
+(function() {
+  "use strict";
+
+/* ================================================================
+   SDK bootstrapping — must load first
+   ================================================================ */
+var SDK = window.__HERMES_PLUGIN_SDK__;
+var React = SDK.React;
+var h = SDK.hooks;
+var comp = SDK.components;
+var util = SDK.utils;
+
+var Card = comp.Card, CardHeader = comp.CardHeader, CardTitle = comp.CardTitle, CardContent = comp.CardContent;
+var Badge = comp.Badge, Button = comp.Button, Input = comp.Input;
+var Tabs = comp.Tabs, TabsList = comp.TabsList, TabsTrigger = comp.TabsTrigger;
+var useState = h.useState, useEffect = h.useEffect, useCallback = h.useCallback;
+var useMemo = h.useMemo, useRef = h.useRef;
+var cn = util.cn, isoTimeAgo = util.isoTimeAgo;
+
+
+/* ─── Icons ───────────────────────────────────────────────────────────── */
+function Icon(p) {
+  return React.createElement("svg", {className: p.className || "", viewBox: "0 0 24 24",
+    fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round"}, p.children);
+}
+
+var I = {
+  folder: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("path", {d:"M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"})); },
+  file: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("path", {d:"M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"}),
+    React.createElement("polyline", {points:"14 2 14 8 20 8"})); },
+  search: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("circle", {cx:11, cy:11, r:8}), React.createElement("line", {x1:21, y1:21, x2:16.65, y2:16.65})); },
+  refresh: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("polyline", {points:"23 4 23 10 17 10"}),
+    React.createElement("path", {d:"M20.49 15a9 9 0 1 1-2.12-9.36L23 10"})); },
+  chevronRight: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("polyline", {points:"9 18 15 12 9 6"})); },
+  chevronDown: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("polyline", {points:"6 9 12 15 18 9"})); },
+  home: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("path", {d:"M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"}),
+    React.createElement("polyline", {points:"9 22 9 12 15 12 15 22"})); },
+  edit: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("path", {d:"M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"}),
+    React.createElement("path", {d:"M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"})); },
+  upload: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("polyline", {points:"16 16 12 12 8 16"}),
+    React.createElement("line", {x1:12, y1:12, x2:12, y2:21}),
+    React.createElement("path", {d:"M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"})); },
+  plus: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("line", {x1:12, y1:5, x2:12, y2:19}), React.createElement("line", {x1:5, y1:12, x2:19, y2:12})); },
+  database: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("ellipse", {cx:12, cy:5, rx:9, ry:3}),
+    React.createElement("path", {d:"M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"}),
+    React.createElement("path", {d:"M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"})); },
+  link: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("path", {d:"M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"}),
+    React.createElement("path", {d:"M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"})); },
+  thumbUp: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("path", {d:"M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"})); },
+  thumbDown: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("path", {d:"M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"})); },
+  minus: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("line", {x1:5, y1:12, x2:19, y2:12})); },
+  checkCircle: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("path", {d:"M22 11.08V12a10 10 0 1 1-5.93-9.14"}),
+    React.createElement("polyline", {points:"22 4 12 14.01 9 11.01"})); },
+  alertCircle: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("circle", {cx:12, cy:12, r:10}),
+    React.createElement("line", {x1:12, y1:8, x2:12, y2:12}),
+    React.createElement("line", {x1:12, y1:16, x2:12.01, y2:16})); },
+  xCircle: function(c) { return React.createElement(Icon, {className: c},
+    React.createElement("circle", {cx:12, cy:12, r:10}),
+    React.createElement("line", {x1:15, y1:9, x2:9, y2:15}),
+    React.createElement("line", {x1:9, y1:9, x2:15, y2:15})); },
+};
+
+
+/* ─── Shared UI ────────────────────────────────────────────────────────── */
+function Spinner(p) {
+  return React.createElement("div", {className: "flex items-center justify-center py-8 text-muted-foreground"},
+    React.createElement("span", {className: "text-sm animate-pulse"}, p.text || "加载中..."));
+}
+function ErrMsg(p) { if (!p.error) return null;
+  return React.createElement("div", {className: "text-sm text-red-500 px-3 py-2 bg-red-500/10 rounded-md"}, p.error); }
+function Empty(p) {
+  return React.createElement("div", {className: "flex flex-col items-center justify-center py-10 text-muted-foreground gap-2"},
+    React.createElement(p.icon || I.file, {className: "w-5 h-5 opacity-25"}),
+    React.createElement("p", {className: "text-sm"}, p.text || "暂无数据"));
+}
+
+
+/* ─── Tab 1: Dashboard ────────────────────────────────────────────────── */
+function DashboardTab(p) {
+  var _h = useState(null), sysHealth = _h[0], setSysHealth = _h[1];
+  var _s = useState(null), sessions = _s[0], setSessions = _s[1];
+  var _l = useState(true), loading = _l[0], setLoading = _l[1];
+  var _e = useState(null), error = _e[0], setError = _e[1];
+
+  useEffect(function() {
+    setLoading(true);
+    Promise.all([
+      SDK.fetchJSON("/api/plugins/ov-console/observer/system").catch(function(e) { return {status:"error", result:null}; }),
+      SDK.fetchJSON("/api/plugins/ov-console/sessions").catch(function(e) { return {status:"error", result:[]}; }),
+    ]).then(function(rs) {
+      setSysHealth(rs[0]);
+      var s = rs[1];
+      setSessions(s && s.result ? s.result : (s || []));
+    }).catch(function(e) { setError(String(e)); })
+     .finally(function() { setLoading(false); });
+  }, []);
+
+  var components = (sysHealth && sysHealth.result) ? sysHealth.result.components || {} : {};
+  var recent = useMemo(function() { return (Array.isArray(sessions) ? sessions : []).slice(0, 5); }, [sessions]);
+  var healthItems = [
+    {key:"retrieval", label:"检索"}, {key:"vikingdb", label:"数据库"},
+    {key:"models", label:"嵌入"}, {key:"lock", label:"锁"}, {key:"queue", label:"队列"},
+  ];
+
+  if (loading) return React.createElement(Spinner, {text: "加载仪表盘..."});
+
+  return React.createElement("div", {className: "flex flex-col gap-4"},
+    /* System Health */
+    React.createElement(Card, null,
+      React.createElement(CardHeader, {className: "pb-2"},
+        React.createElement(CardTitle, {className: "text-base"}, "系统健康"),
+        React.createElement(CardContent, null,
+          React.createElement("div", {className: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2"},
+            healthItems.map(function(it) {
+              var c = components[it.key];
+              var ok = c && c.is_healthy !== false;
+              return React.createElement("div", {key: it.key, className: "flex flex-col items-center gap-1 p-2 border border-border rounded-md text-center"},
+                ok ? React.createElement(I.checkCircle, {className: "w-4 h-4 text-green-500"})
+                   : React.createElement(I.alertCircle, {className: "w-4 h-4 text-yellow-500"}),
+                React.createElement("span", {className: "text-xs font-medium"}, it.label),
+                React.createElement(Badge, {variant:"outline", className: cn("text-xs", ok ? "border-green-500/40 text-green-500" : "border-yellow-500/40 text-yellow-500")}, ok ? "正常" : "异常")
+              );
+            })
+          )
+        )
+      )
+    ),
+    /* Recent Sessions */
+    React.createElement(Card, null,
+      React.createElement(CardHeader, {className: "pb-2"},
+        React.createElement(CardTitle, {className: "text-base"}, "最新会话"),
+        React.createElement(CardContent, null,
+          recent.length === 0
+            ? React.createElement(Empty, {icon: I.file, text: "暂无会话记录"})
+            : React.createElement("div", {className: "flex flex-col gap-1"},
+                recent.map(function(s) {
+                  var name = s.uri ? s.uri.replace(/^viking:\/\/session\/[^/]+\//, '').substring(0, 30) : "未命名";
+                  return React.createElement("div", {key: s.session_id || s.uri || name, className: "flex items-center gap-2 py-1.5 text-sm"},
+                    React.createElement(I.chevronRight, {className: "w-3.5 h-3.5 text-muted-foreground flex-shrink-0"}),
+                    React.createElement("span", {className: "truncate flex-1 font-mono text-xs"}, name),
+                    React.createElement("span", {className: "text-xs text-muted-foreground flex-shrink-0"}, s.session_id ? s.session_id.substring(0,8) : "—")
+                  );
+                })
+              )
+        )
+      )
+    ),
+    /* Quick Actions */
+    React.createElement(Card, null,
+      React.createElement(CardHeader, {className: "pb-2"},
+        React.createElement(CardTitle, {className: "text-base"}, "快捷入口"),
+        React.createElement(CardContent, null,
+          React.createElement("div", {className: "flex flex-wrap gap-2"},
+            [
+              {label:"写内容", icon:React.createElement(I.edit,{className:"w-3.5 h-3.5"}), tab:"browse"},
+              {label:"上传资源", icon:React.createElement(I.upload,{className:"w-3.5 h-3.5"}), tab:"browse"},
+              {label:"打开浏览", icon:React.createElement(I.folder,{className:"w-3.5 h-3.5"}), tab:"browse"},
+              {label:"语义搜索", icon:React.createElement(I.search,{className:"w-3.5 h-3.5"}), tab:"search"},
+            ].map(function(b) {
+              return React.createElement(Button, {key: b.label, variant:"outline", size:"sm", className:"gap-1.5 text-xs h-8",
+                onClick: function() { p.setActive && p.setActive(b.tab); }}, b.icon, b.label);
+            })
+          )
+        )
+      )
+    ),
+    React.createElement(ErrMsg, {error: error})
+  );
+}
+
+
+/* ─── Tab 2: Browse ───────────────────────────────────────────────────── */
+function BrowseTab() {
+  var initState = {
+    selectedUri: null, tree: [], contents: [], previewMode: "abstract",
+    searchMode: "browse", searchResults: [], relations: [], loading: false,
+    treeLoading: false, previewLoading: false, error: null, grepPattern: "", globPattern: "",
+  };
+  var reducer = function(s, a) {
+    switch (a.type) {
+      case "SET_STATE": return Object.assign({}, s, a.payload);
+      case "SET_TREE_LOADING": return Object.assign({}, s, {treeLoading: a.v});
+      case "SET_LOADING": return Object.assign({}, s, {loading: a.v});
+      case "SET_PREVIEW_LOADING": return Object.assign({}, s, {previewLoading: a.v});
+      case "SET_ERROR": return Object.assign({}, s, {error: a.v});
+      case "SET_CONTENTS": return Object.assign({}, s, {contents: a.v, loading: false});
+      case "SET_SELECTED": return Object.assign({}, s, {selectedUri: a.uri, contents:[], relations:[], previewLoading:false});
+      case "SET_PREVIEW_MODE": return Object.assign({}, s, {previewMode: a.v});
+      case "SET_SEARCH_MODE": return Object.assign({}, s, {searchMode: a.v, searchResults: []});
+      case "SET_SEARCH_RESULTS": return Object.assign({}, s, {searchResults: a.v, loading: false});
+      case "SET_RELATIONS": return Object.assign({}, s, {relations: a.v});
+      default: return s;
+    }
+  };
+  var _s = useState(initState), st = _s[0], setSt = _s[1];
+  var dispatch = useCallback(function(action) { setSt(function(prev) { return reducer(prev, action); }); }, []);
+  var _fu = useState(null), fileUri = _fu[0], setFileUri = _fu[1];
+  var _fc = useState(null), fileContent = _fc[0], setFileContent = _fc[1];
+
+  var loadTree = useCallback(function() {
+    dispatch({type:"SET_TREE_LOADING", v:true});
+    SDK.fetchJSON("/api/plugins/ov-console/fs/tree").then(function(d) {
+      dispatch({type:"SET_STATE", payload:{tree: d && d.result ? d.result : [], treeLoading:false}});
+    }).catch(function(e) {
+      dispatch({type:"SET_ERROR", v:"加载目录树失败: "+(e.message||e)});
+      dispatch({type:"SET_TREE_LOADING", v:false});
+    });
+  }, []);
+
+  var loadDir = useCallback(function(uri) {
+    dispatch({type:"SET_LOADING", v:true});
+    dispatch({type:"SET_ERROR", v:null});
+    SDK.fetchJSON("/api/plugins/ov-console/fs/ls?uri=" + encodeURIComponent(uri || "")).then(function(d) {
+      var items = d && d.result ? d.result : [];
+      items.sort(function(a, b) {
+        if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+        return (a.uri||"").localeCompare(b.uri||"");
+      });
+      dispatch({type:"SET_CONTENTS", v:items});
+    }).catch(function(e) {
+      dispatch({type:"SET_ERROR", v:"加载目录失败: "+(e.message||e)});
+      dispatch({type:"SET_LOADING", v:false});
+    });
+  }, []);
+
+  var loadPreview = useCallback(function(uri) {
+    setFileUri(uri); setFileContent(null);
+    if (!uri) return;
+    dispatch({type:"SET_PREVIEW_LOADING", v:true});
+    var mode = st.previewMode || "abstract";
+    SDK.fetchJSON("/api/plugins/ov-console/content/read?uri=" + encodeURIComponent(uri) + "&mode=" + mode).then(function(d) {
+      var text = d && d.result !== undefined ? d.result : (d.content || d.data || JSON.stringify(d));
+      setFileContent(text); dispatch({type:"SET_PREVIEW_LOADING", v:false});
+    }).catch(function(e) {
+      dispatch({type:"SET_PREVIEW_LOADING", v:false});
+      setFileContent("加载失败: " + (e.message||e));
+    });
+  }, [st.previewMode]);
+
+  var loadRelations = useCallback(function(uri) {
+    if (!uri) { dispatch({type:"SET_RELATIONS", v:[]}); return; }
+    SDK.fetchJSON("/api/plugins/ov-console/relations?uri=" + encodeURIComponent(uri)).then(function(d) {
+      dispatch({type:"SET_RELATIONS", v: d && d.result ? d.result : []});
+    }).catch(function() { dispatch({type:"SET_RELATIONS", v:[]}); });
+  }, []);
+
+  var selectItem = useCallback(function(item) {
+    if (!item) return;
+    dispatch({type:"SET_SELECTED", uri: item.uri});
+    if (item.isDir || item.is_directory) { loadDir(item.uri); setFileUri(null); setFileContent(null); }
+    else { loadPreview(item.uri); loadRelations(item.uri); }
+  }, [loadDir, loadPreview, loadRelations]);
+
+  var setPreviewMode = useCallback(function(mode) {
+    dispatch({type:"SET_PREVIEW_MODE", v:mode});
+    if (st.selectedUri) {
+      dispatch({type:"SET_PREVIEW_LOADING", v:true});
+      SDK.fetchJSON("/api/plugins/ov-console/content/read?uri=" + encodeURIComponent(st.selectedUri) + "&mode=" + mode).then(function(d) {
+        var text = d && d.result !== undefined ? d.result : (d.content || d.data || JSON.stringify(d));
+        setFileContent(text); dispatch({type:"SET_PREVIEW_LOADING", v:false});
+      }).catch(function(e) { setFileContent("加载失败: "+(e.message||e)); dispatch({type:"SET_PREVIEW_LOADING", v:false}); });
+    }
+  }, [st.selectedUri]);
+
+  var setSearchMode = useCallback(function(mode) {
+    dispatch({type:"SET_SEARCH_MODE", v:mode});
+    if (mode !== "browse") dispatch({type:"SET_CONTENTS", v:[]});
+  }, []);
+
+  var doGrep = useCallback(function(pattern) {
+    if (!pattern.trim()) return;
+    dispatch({type:"SET_LOADING", v:true});
+    SDK.fetchJSON("/api/plugins/ov-console/search/grep", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({uri: st.selectedUri || "", pattern: pattern.trim()})
+    }).then(function(d) { dispatch({type:"SET_SEARCH_RESULTS", v: d && d.result ? d.result : []}); })
+     .catch(function(e) { dispatch({type:"SET_ERROR", v:"Grep失败: "+(e.message||e)}); dispatch({type:"SET_LOADING", v:false}); });
+  }, [st.selectedUri]);
+
+  var doGlob = useCallback(function(pattern) {
+    if (!pattern.trim()) return;
+    dispatch({type:"SET_LOADING", v:true});
+    SDK.fetchJSON("/api/plugins/ov-console/search/glob", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({pattern: pattern.trim()})
+    }).then(function(d) { dispatch({type:"SET_SEARCH_RESULTS", v: d && d.result ? d.result : []}); })
+     .catch(function(e) { dispatch({type:"SET_ERROR", v:"Glob失败: "+(e.message||e)}); dispatch({type:"SET_LOADING", v:false}); });
+  }, []);
+
+  useEffect(function() { loadTree(); loadDir(""); }, [loadTree, loadDir]);
+
+  var rootItems = useMemo(function() {
+    return st.tree.filter(function(n) { return !n.rel_path || n.rel_path.split("/").filter(Boolean).length <= 1; });
+  }, [st.tree]);
+
+  var searchMode = st.searchMode;
+
+  return React.createElement("div", {className: "flex flex-col gap-3"},
+    React.createElement(ErrMsg, {error: st.error}),
+
+    /* Mode toggle bar */
+    React.createElement("div", {className: "flex flex-col gap-2"},
+      React.createElement("div", {className: "flex items-center gap-2 flex-wrap"},
+        React.createElement(Badge, {variant:"outline", className:"text-xs"}, "搜索模式:"),
+        [{v:"browse",l:"浏览"},{v:"grep",l:"Grep"},{v:"glob",l:"Glob"}].map(function(m) {
+          return React.createElement(Button, {key: m.v, variant: searchMode===m.v ? "default" : "outline", size:"sm", className:"h-7 text-xs",
+            onClick: function() { setSearchMode(m.v); if (m.v !== "browse") return; loadDir(st.selectedUri || ""); }}, m.l);
+        }),
+        React.createElement(Button, {variant:"ghost", size:"icon", className:"h-7 w-7 ml-auto", onClick:loadTree, title:"刷新"},
+          React.createElement(I.refresh, {className:"w-3.5 h-3.5"}))
+      ),
+      searchMode !== "browse" && React.createElement("div", {className: "flex gap-2"},
+        React.createElement(Input, {className:"h-8 text-xs",
+          placeholder: searchMode==="grep" ? "输入正则表达式..." : "输入 glob 模式...",
+          value: searchMode==="grep" ? st.grepPattern : st.globPattern,
+          onChange: function(e) {
+            var val = e.target.value;
+            dispatch({type:"SET_STATE", payload: searchMode==="grep" ? {grepPattern:val} : {globPattern:val}});
+          },
+          onKeyDown: function(e) { if (e.key === "Enter") { searchMode==="grep" ? doGrep(e.target.value) : doGlob(e.target.value); } }
+        }),
+        React.createElement(Button, {size:"sm", className:"h-8 text-xs", onClick: function() {
+          if (searchMode==="grep") doGrep(st.grepPattern || ""); else doGlob(st.globPattern || ""); }}, "搜索")
+      )
+    ),
+
+    /* Left tree + Right content */
+    React.createElement("div", {className: "flex gap-3 min-h-[400px]"},
+      React.createElement("div", {className: "w-2/5 border border-border rounded-md overflow-y-auto max-h-[500px]"},
+        st.treeLoading ? React.createElement(Spinner, {text:"加载目录树..."})
+        : rootItems.length === 0 ? React.createElement(Empty, {icon:I.folder, text:"空集合"})
+        : React.createElement("div", {className: "py-1"},
+            rootItems.map(function(node) {
+              var name = node.uri ? node.uri.replace(/^viking:\/\//, "").split("/").pop() || node.uri : "?";
+              var isDir = node.isDir || node.is_directory;
+              return React.createElement("div", {
+                key: node.uri || name,
+                className: cn("flex items-center gap-2 py-1.5 px-3 text-sm cursor-pointer hover:bg-foreground/5 transition-colors", st.selectedUri === node.uri && "bg-foreground/10"),
+                onClick: function() { selectItem(node); }
+              },
+                isDir ? React.createElement(I.folder, {className:"w-4 h-4 text-yellow-500 flex-shrink-0"})
+                      : React.createElement(I.file, {className:"w-4 h-4 text-muted-foreground flex-shrink-0"}),
+                React.createElement("span", {className:"truncate flex-1 text-xs font-mono"}, name)
+              );
+            })
+          )
+      ),
+
+      /* Right panel */
+      React.createElement("div", {className: "w-3/5 flex flex-col gap-3"},
+        searchMode === "browse" && React.createElement("div", {className: "border border-border rounded-md overflow-y-auto max-h-[200px]"},
+          st.loading ? React.createElement(Spinner, {text:"加载中..."})
+          : st.contents.length === 0 ? React.createElement(Empty, {icon:I.folder, text:"此目录为空"})
+          : React.createElement("div", {className: "py-1"},
+              st.contents.map(function(item, i) {
+                var name = item.uri ? item.uri.split("/").pop() : "?";
+                return React.createElement("div", {
+                  key: item.uri || i,
+                  className: cn("flex items-center gap-2 py-1.5 px-3 text-sm cursor-pointer hover:bg-foreground/5 transition-colors", st.selectedUri === item.uri && "bg-foreground/10"),
+                  onClick: function() { selectItem(item); }
+                },
+                  (item.isDir || item.is_directory) ? React.createElement(I.folder, {className:"w-4 h-4 text-yellow-500 flex-shrink-0"})
+                                                     : React.createElement(I.file, {className:"w-4 h-4 text-muted-foreground flex-shrink-0"}),
+                  React.createElement("span", {className:"truncate flex-1 text-xs"}, name),
+                  item.size && React.createElement("span", {className:"text-xs text-muted-foreground flex-shrink-0"},
+                    item.size > 1024 ? Math.round(item.size/1024)+"KB" : item.size+"B"),
+                  item.modTime && React.createElement("span", {className:"text-xs text-muted-foreground flex-shrink-0"}, isoTimeAgo(item.modTime))
+                );
+              })
+            )
+        ),
+
+        searchMode !== "browse" && React.createElement("div", {className: "border border-border rounded-md overflow-y-auto max-h-[200px]"},
+          st.loading ? React.createElement(Spinner, {text:"搜索中..."})
+          : st.searchResults.length === 0 ? React.createElement(Empty, {icon:I.search, text:"无搜索结果"})
+          : React.createElement("div", {className: "py-1"},
+              st.searchResults.map(function(item, i) {
+                var name = item.uri ? item.uri.split("/").pop() : "?";
+                return React.createElement("div", {
+                  key: item.uri || i,
+                  className: cn("flex items-center gap-2 py-1.5 px-3 text-sm cursor-pointer hover:bg-foreground/5 transition-colors", st.selectedUri === item.uri && "bg-foreground/10"),
+                  onClick: function() {
+                    dispatch({type:"SET_SELECTED", uri: item.uri});
+                    loadPreview(item.uri); loadRelations(item.uri);
+                  }
+                },
+                  React.createElement(I.file, {className:"w-4 h-4 text-muted-foreground flex-shrink-0"}),
+                    React.createElement("span", {
+                      className: "text-xs text-muted-foreground font-mono truncate cursor-pointer hover:text-blue-500 hover:underline max-w-[300px]",
+                      title: "点击复制 URI: " + (item.uri || ""),
+                      onClick: function(e) { e.stopPropagation(); if (navigator.clipboard) navigator.clipboard.writeText(item.uri); }
+                    }, name),
+                  item.match && React.createElement("span", {className:"text-xs text-muted-foreground truncate max-w-[200px]"}, item.match)
+                );
+              })
+            )
+        ),
+
+        /* Preview */
+        React.createElement(Card, null,
+          React.createElement(CardHeader, {className: "pb-1"},
+            React.createElement("div", {className: "flex items-center gap-2"},
+              React.createElement(CardTitle, {className: "text-xs"}, "预览"),
+              React.createElement("div", {className: "flex gap-1 ml-auto"},
+                [{v:"abstract",l:"摘要"},{v:"overview",l:"概览"},{v:"full",l:"全文"}].map(function(m) {
+                  return React.createElement(Button, {key: m.v, variant: st.previewMode===m.v ? "default" : "outline", size:"sm", className:"h-6 text-xs px-2",
+                    onClick: function() { setPreviewMode(m.v); }}, m.l);
+                })
+              )
+            )
+          ),
+          React.createElement(CardContent, null,
+            !fileUri && !st.previewLoading
+              ? React.createElement("div", {className:"flex items-center justify-center h-24 text-muted-foreground"},
+                  React.createElement("span", {className:"text-xs"}, "选择文件查看预览"))
+              : st.previewLoading
+                ? React.createElement(Spinner, {text:"加载预览..."})
+                : fileContent
+                  ? React.createElement(React.Fragment, null,
+                      React.createElement("div", {className:"font-mono text-xs leading-relaxed whitespace-pre-wrap break-all max-h-[400px] overflow-auto"},
+                        (typeof fileContent === "string" ? fileContent : JSON.stringify(fileContent, null, 2)).substring(0, 8000)),
+                      fileUri && React.createElement("div", {className:"flex items-center gap-1 mt-1"},
+                        React.createElement("span", {className:"text-xs text-muted-foreground font-mono truncate flex-1"}, fileUri),
+                        React.createElement(Button, {variant:"ghost", size:"sm", className:"h-5 text-xs text-muted-foreground",
+                          onClick: function() { if (navigator.clipboard) { navigator.clipboard.writeText(fileUri); } }},
+                          "复制出处")))
+                  : React.createElement("span", {className:"text-xs text-muted-foreground"}, "无内容")
+          )
+        ),
+
+        /* Relations */
+        React.createElement(Card, null,
+          React.createElement(CardHeader, {className: "pb-1"},
+            React.createElement(CardTitle, {className: "text-xs"}, "关联资源")
+          ),
+          React.createElement(CardContent, null,
+            st.relations.length === 0
+              ? React.createElement("span", {className:"text-xs text-muted-foreground"}, "暂无关联")
+              : React.createElement("div", {className: "flex flex-col gap-1"},
+                  st.relations.map(function(rel, i) {
+                    return React.createElement("div", {key: i, className: "flex items-center gap-2 text-xs"},
+                      React.createElement(I.link, {className:"w-3 h-3 text-muted-foreground flex-shrink-0"}),
+                      React.createElement(Badge, {variant:"outline", className:"text-xs h-5"}, rel.edge_type || "related"),
+                      React.createElement("span", {className:"truncate flex-1 font-mono"}, rel.to || rel.from || "—")
+                    );
+                  })
+                )
+          )
+        )
+      )
+    )
+  );
+}
+
+
+/* ─── Tab 3: Search ───────────────────────────────────────────────────── */
+function SearchTab() {
+  var _q = useState(""), query = _q[0], setQuery = _q[1];
+  var _r = useState(null), results = _r[0], setResults = _r[1];
+  var _l = useState(false), searching = _l[0], setSearching = _l[1];
+  var _s = useState(false), searched = _s[0], setSearched = _s[1];
+  var _e = useState(null), error = _e[0], setError = _e[1];
+  var _qp = useState(null), queryPlan = _qp[0], setQueryPlan = _qp[1];
+  var _m = useState("auto"), searchMode = _m[0], setSearchMode = _m[1];
+  var relCache = useRef({});
+  var relExpanded = useRef({});
+  var contentCache = useRef({});
+
+  var doSearch = useCallback(function() {
+    if (!query.trim()) return;
+    setSearching(true); setSearched(false); setError(null);
+    setQueryPlan(null); setResults(null);
+    SDK.fetchJSON("/api/plugins/ov-console/search", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({query: query.trim(), limit: 20, mode: searchMode})
+    }).then(function(d) {
+      var plan = d && (d.query_plan || d.query_plan_used || (d.result && d.result.query_plan));
+      setQueryPlan(plan || null);
+      var mems = d && d.result ? (d.result.memories || d.memories || []) : [];
+      var ress = d && d.result ? (d.result.resources || d.resources || []) : [];
+      var skls = d && d.result ? (d.result.skills || d.skills || []) : [];
+      setResults({memories:mems, resources:ress, skills:skls, total: d && d.total !== undefined ? d.total : (mems.length+ress.length+skls.length)});
+      setSearched(true);
+    }).catch(function(e) {
+      setError("搜索失败: " + (e.message || e));
+      setSearched(true);
+    }).finally(function() { setSearching(false); });
+  }, [query, searchMode]);
+
+  var toggleRelations = useCallback(function(uri) {
+    if (relCache.current[uri]) {
+      relExpanded.current[uri] = !relExpanded.current[uri];
+      setResults(function(prev) { return prev ? Object.assign({}, prev) : prev; });
+      return;
+    }
+    SDK.fetchJSON("/api/plugins/ov-console/relations?uri=" + encodeURIComponent(uri)).then(function(d) {
+      relCache.current[uri] = d && d.result ? d.result : [];
+      relExpanded.current[uri] = true;
+      setResults(function(prev) { return prev ? Object.assign({}, prev) : prev; });
+    }).catch(function() { relCache.current[uri] = []; relExpanded.current[uri] = true; });
+  }, []);
+
+  var loadContent = useCallback(function(uri) {
+    if (contentCache.current[uri]) return;
+    SDK.fetchJSON("/api/plugins/ov-console/content/read?uri=" + encodeURIComponent(uri) + "&mode=full").then(function(d) {
+      var text = d && d.result !== undefined ? d.result : (d.content || d.data || "");
+      contentCache.current[uri] = typeof text === "string" ? text : JSON.stringify(text, null, 2);
+      setResults(function(prev) { return prev ? Object.assign({}, prev) : prev; });
+    }).catch(function() { contentCache.current[uri] = "(加载失败)"; });
+  }, []);
+
+  var toggleContent = useCallback(function(uri) {
+    if (contentCache.current[uri]) {
+      contentCache.current[uri] = null;
+    } else {
+      loadContent(uri);
+    }
+    setResults(function(prev) { return prev ? Object.assign({}, prev) : prev; });
+  }, [loadContent]);
+
+  var sendFeedback = useCallback(function(uri, outcome) {
+    SDK.fetchJSON("/api/plugins/ov-console/feedback", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({uri: uri, outcome: outcome})
+    }).then(function(d) {
+      var strength = d && d.result && d.result.synapse_strength !== undefined ? d.result.synapse_strength : null;
+      if (strength !== null) {
+        relCache.current["_synapse_" + uri] = strength;
+        setResults(function(prev) { return prev ? Object.assign({}, prev) : prev; });
+      }
+    }).catch(function() {});
+  }, []);
+
+  var copyUri = useCallback(function(uri) {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(uri).then(function() {
+        alert("URI 已复制: " + uri);
+      });
+    }
+  }, []);
+
+  function ResultCard(p) {
+    var item = p.item, type = p.type;
+    var uri = item.uri || "";
+    var name = uri.split("/").pop() || "?";
+    var abs = (item.abstract || item.snippet || item.content || "—") + "";
+    var shortAbs = abs.substring(0, 300);
+    var score = item.score !== undefined ? (item.score * 100).toFixed(0) : null;
+    var syn = relCache.current["_synapse_" + uri];
+    var rels = relCache.current[uri] || [];
+    var relsOpen = !!relExpanded.current[uri];
+    var fullContent = contentCache.current[uri];
+    var contentOpen = fullContent !== undefined && fullContent !== null;
+    var cfg = {memory:{badge:"bg-purple-500/20 text-purple-500 border-purple-500/30", label:"记忆"},
+               resource:{badge:"bg-blue-500/20 text-blue-500 border-blue-500/30", label:"资源"},
+               skill:{badge:"bg-green-500/20 text-green-500 border-green-500/30", label:"技能"}}[type] || {badge:"", label:type};
+
+    return React.createElement("div", {className: "border border-border rounded-md p-2.5 flex flex-col gap-1.5"},
+      /* 标题行: 名称 + 分数 + 类型badge */
+      React.createElement("div", {className: "flex items-center gap-1.5 flex-wrap"},
+        React.createElement(I.file, {className:"w-3.5 h-3.5 text-muted-foreground flex-shrink-0"}),
+        React.createElement("span", {
+          className: "text-sm font-medium truncate flex-1 cursor-pointer hover:text-blue-500 hover:underline transition-colors",
+          title: "点击复制 URI",
+          onClick: function(e) { e.stopPropagation(); copyUri(uri); }
+        }, name),
+        score && React.createElement(Badge, {variant:"outline", className:"text-xs px-1.5 py-0"}, "⭐" + score + "%"),
+        React.createElement(Badge, {className: cn("text-xs px-1.5 py-0 border", cfg.badge)}, cfg.label)
+      ),
+
+      /* URI行 */
+      React.createElement("div", {className: "flex items-center gap-1"},
+        React.createElement("span", {
+          className: "text-xs text-muted-foreground font-mono truncate cursor-pointer hover:text-foreground",
+          title: "点击复制",
+          onClick: function(e) { e.stopPropagation(); copyUri(uri); }
+        }, uri.length > 80 ? uri.substring(0, 77) + "..." : uri)
+      ),
+
+      /* 摘要 */
+      abs && React.createElement("p", {className: "text-xs text-muted-foreground leading-relaxed"}, shortAbs),
+
+      /* 操作按钮栏 */
+      React.createElement("div", {className: "flex items-center gap-1.5 flex-wrap"},
+        React.createElement(Button, {variant:"outline", size:"sm", className:"h-6 text-xs px-2",
+          onClick: function() { toggleContent(uri); }},
+          contentOpen ? "收起原文" : "查看原文"),
+        React.createElement(Button, {variant:"ghost", size:"sm", className:"h-6 text-xs px-2 text-muted-foreground",
+          onClick: function(e) { e.stopPropagation(); copyUri(uri); }},
+          "复制出处"),
+        React.createElement("span", {className: "flex-1"}),
+        React.createElement(Button, {variant:"outline", size:"icon", className:"h-5 w-5", onClick:function(){sendFeedback(uri,"success")}, title:"有用"},
+          React.createElement(I.thumbUp, {className:"w-2.5 h-2.5"})),
+        React.createElement(Button, {variant:"outline", size:"icon", className:"h-5 w-5", onClick:function(){sendFeedback(uri,"failure")}, title:"没用"},
+          React.createElement(I.thumbDown, {className:"w-2.5 h-2.5"}))
+      ),
+
+      /* 原文展开区 */
+      contentOpen && fullContent && React.createElement("div", {className: "mt-1 border-t border-border pt-2"},
+        React.createElement("div", {className: "font-mono text-xs leading-relaxed whitespace-pre-wrap break-all max-h-[400px] overflow-auto bg-foreground/5 rounded p-2"},
+          fullContent.length > 5000 ? fullContent.substring(0, 5000) + "\n\n... (内容过长，显示前5000字)" : fullContent)
+      ),
+
+      /* 关联 */
+      React.createElement("div", {className: "flex flex-col gap-0.5"},
+        React.createElement("button", {
+          className: "flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors text-left",
+          onClick: function() { toggleRelations(uri); }
+        },
+          React.createElement(I.link, {className:"w-2.5 h-2.5"}),
+          "关联: ", rels.length > 0 ? rels.length + " 项" : (relsOpen ? "无关联" : "加载关联"),
+          relsOpen ? React.createElement(I.chevronDown, {className:"w-2.5 h-2.5"}) : React.createElement(I.chevronRight, {className:"w-2.5 h-2.5"})
+        ),
+        relsOpen && rels.length > 0 && React.createElement("div", {className: "pl-4 flex flex-col gap-0.5"},
+          rels.map(function(rel, i) {
+            return React.createElement("span", {key: i, className: "text-xs text-muted-foreground truncate"},
+              (rel.edge_type || "related") + " → " + (rel.to || rel.from || "—"));
+          })
+        )
+      )
+    );
+  }
+
+  var typeOrder = ["memories", "resources", "skills"];
+  var typeNames = {memories:"记忆", resources:"资源", skills:"技能"};
+
+  return React.createElement("div", {className: "flex flex-col gap-2"},
+    React.createElement(ErrMsg, {error: error}),
+
+    /* Search bar */
+    React.createElement("div", {className: "flex gap-2 flex-wrap"},
+      React.createElement("div", {className: "relative flex-1 min-w-[200px]"},
+        React.createElement("span", {className: "absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"},
+          React.createElement(I.search, {className:"w-3.5 h-3.5"})),
+        React.createElement(Input, {className:"pl-8 h-8 text-sm", placeholder:"语义搜索资源库...",
+          value: query,
+          onChange: function(e) { setQuery(e.target.value); },
+          onKeyDown: function(e) { if (e.key === "Enter") doSearch(); }})
+      ),
+      React.createElement("select", {className:"h-8 px-2 text-xs border border-border rounded-md bg-background",
+        value: searchMode, onChange: function(e) { setSearchMode(e.target.value); }},
+        React.createElement("option", {value:"auto"}, "自动"),
+        React.createElement("option", {value:"fast"}, "快速"),
+        React.createElement("option", {value:"deep"}, "深度")
+      ),
+      React.createElement(Button, {onClick:doSearch, disabled:searching || !query.trim(), size:"sm", className:"h-8"}, searching ? "搜索中..." : "搜索")
+    ),
+
+    /* Result counts */
+    searched && results && React.createElement("div", {className:"flex gap-2 items-center flex-wrap text-xs text-muted-foreground"},
+      React.createElement("span", null, "共 ", results.total || 0, " 条结果"),
+      typeOrder.map(function(t) {
+        var arr = results[t] || [];
+        return arr.length > 0
+          ? React.createElement(Badge, {key:t, variant:"outline", className:"text-xs px-1.5 py-0"}, typeNames[t] + " " + arr.length)
+          : null;
+      })
+    ),
+
+    /* Results — 按相关性混合排列，不按type分组 */
+    React.createElement("div", {className:"flex flex-col gap-2"},
+      !searched ? React.createElement(Empty, {icon:I.search, text:"输入关键词开始搜索"})
+      : (results && results.total === 0) ? React.createElement(Empty, {icon:I.search, text:"未找到结果"})
+      : function() {
+          // 混合排列所有结果（保持搜索结果原始顺序）
+          var all = [];
+          typeOrder.forEach(function(t) {
+            var arr = results && results[t] ? results[t] : [];
+            arr.forEach(function(item) {
+              all.push({item: item, type: t === "memories" ? "memory" : t === "resources" ? "resource" : "skill"});
+            });
+          });
+          return all.map(function(e, i) {
+            return React.createElement(ResultCard, {key: e.item.uri || i, item: e.item, type: e.type});
+          });
+        }()
+    )
+  );
+}
+
+
+/* ─── App ──────────────────────────────────────────────────────────────── */
+function App() {
+  return React.createElement(Tabs, {defaultValue: "dashboard", className: "w-full"},
+    function(active, setActive) {
+      return React.createElement(React.Fragment, null,
+        React.createElement(TabsList, null,
+          React.createElement(TabsTrigger, {value:"dashboard", active:active==="dashboard", onClick:function(){setActive("dashboard")}}, "仪表盘"),
+          React.createElement(TabsTrigger, {value:"browse",    active:active==="browse",    onClick:function(){setActive("browse")}},    "浏览"),
+          React.createElement(TabsTrigger, {value:"search",    active:active==="search",    onClick:function(){setActive("search")}},    "搜索")
+        ),
+        active === "dashboard" && React.createElement(DashboardTab, {setActive: setActive}),
+        active === "browse"    && React.createElement(BrowseTab, null),
+        active === "search"    && React.createElement(SearchTab, null)
+      );
+    }
+  );
+}
+
+
+  window.__HERMES_PLUGINS__.register("ov-console", App);
+})();

@@ -1,0 +1,13 @@
+{
+  "name": "ov-console",
+  "label": "资源库",
+  "description": "OpenViking 资源库 — Agent 技能/记忆、外部文档、会话归档的可视化管理",
+  "icon": "Database",
+  "version": "2.0.0",
+  "tab": {
+    "path": "/ov-console",
+    "position": "after:skills"
+  },
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}

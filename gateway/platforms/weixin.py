@@ -21,7 +21,9 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
 import struct
+import subprocess
 import tempfile
 import time
 import uuid
@@ -106,8 +108,8 @@ def _is_stale_session_ret(
 
 MEDIA_IMAGE = 1
 MEDIA_VIDEO = 2
-MEDIA_FILE = 3
-MEDIA_VOICE = 4
+MEDIA_VOICE = 3   # iLink protocol: VOICE=3 (matches OpenClaw MediaFileType)
+MEDIA_FILE = 4    # iLink protocol: FILE=4
 
 _LIVE_ADAPTERS: Dict[str, Any] = {}
 
@@ -1123,6 +1125,130 @@ async def qr_login(
         return None
 
 
+# SILK encoder bundled with OpenClaw (QQ/WeChat voice codec)
+_SILK_WASM_CANDIDATES = [
+    # OpenClaw global install (Windows)
+    "/mnt/c/Users/BYYG/AppData/Roaming/npm/node_modules/openclaw/dist/extensions/qqbot/node_modules/silk-wasm",
+]
+
+
+def _find_silk_wasm() -> Optional[str]:
+    """Locate the silk-wasm Node.js module."""
+    for path in _SILK_WASM_CANDIDATES:
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+def _has_ffmpeg() -> bool:
+    """Check if ffmpeg is available on the system."""
+    return shutil.which("ffmpeg") is not None
+
+
+def _convert_to_silk(audio_path: str) -> Optional[str]:
+    """
+    Convert any audio file to SILK format for WeChat native voice bubbles.
+
+    Pipeline: audio → WAV (24kHz/16bit/mono via ffmpeg) → SILK (via silk-wasm).
+
+    Args:
+        audio_path: Path to the input audio file (MP3, WAV, OGG, etc.)
+
+    Returns:
+        Path to the .silk file, or None if conversion fails.
+    """
+    silk_wasm_dir = _find_silk_wasm()
+    if not silk_wasm_dir:
+        logger.warning("silk-wasm not found — SILK conversion skipped for WeChat voice")
+        return None
+
+    if not _has_ffmpeg():
+        logger.warning("ffmpeg not found — cannot convert to SILK")
+        return None
+
+    silk_path = audio_path.rsplit(".", 1)[0] + ".silk"
+
+    # Step 1: Convert to WAV (24kHz, 16-bit, mono) — required by silk-wasm
+    wav_path = audio_path.rsplit(".", 1)[0] + "_tmp.wav"
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", audio_path, "-ar", "24000", "-ac", "1",
+             "-sample_fmt", "s16", wav_path, "-y"],
+            capture_output=True, timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning("ffmpeg→WAV failed (rc=%d): %s",
+                          result.returncode,
+                          result.stderr.decode("utf-8", errors="ignore")[:200])
+            return None
+
+        # Step 2: WAV → SILK via silk-wasm (Node.js)
+        js_code = f"""
+const {{ encode }} = require({json.dumps(silk_wasm_dir)});
+const fs = require('fs');
+async function main() {{
+    const wav = fs.readFileSync({json.dumps(wav_path)});
+    const result = await encode(wav, 0);
+    fs.writeFileSync({json.dumps(silk_path)}, result.data);
+}}
+main().catch(e => {{ console.error(e.message); process.exit(1); }});
+"""
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning("silk-wasm encode failed: %s",
+                          result.stderr.decode("utf-8", errors="ignore")[:200])
+            return None
+
+        if os.path.exists(silk_path) and os.path.getsize(silk_path) > 0:
+            return silk_path
+
+    except subprocess.TimeoutExpired:
+        logger.warning("SILK conversion timed out")
+    except FileNotFoundError as e:
+        logger.warning("SILK conversion dependency missing: %s", e)
+    except Exception as e:
+        logger.warning("SILK conversion failed: %s", e, exc_info=True)
+    finally:
+        # Clean up temp WAV
+        try:
+            os.unlink(wav_path)
+        except OSError:
+            pass
+
+    return None
+
+
+def _silk_duration_ms(data: bytes) -> int:
+    """Calculate duration in milliseconds from SILK V3 binary data.
+    
+    SILK V3 format: header followed by frames.
+    Each frame has a 2-byte little-endian size prefix, then frame data.
+    Frame duration is 20ms.
+    """
+    import struct
+    try:
+        idx = 0
+        if data[0:1] == b'\x02':
+            idx = 1
+        if data[idx:idx + 9] == b'#!SILK_V3':
+            idx += 9
+            while idx < len(data) and data[idx:idx+1] in (b'\n', b'\r'):
+                idx += 1
+        else:
+            return 0
+        frame_count = 0
+        while idx + 2 <= len(data):
+            frame_size = struct.unpack_from('<H', data, idx)[0]
+            idx += 2 + frame_size
+            frame_count += 1
+        return frame_count * 20
+    except Exception:
+        return 0
+
+
 class WeixinAdapter(BasePlatformAdapter):
     """Native Hermes adapter for Weixin personal accounts."""
 
@@ -1620,7 +1746,7 @@ class WeixinAdapter(BasePlatformAdapter):
         _, image_cleaned = self.extract_images(cleaned_content)
         local_files, final_content = self.extract_local_files(image_cleaned)
 
-        _AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac"}
+        _AUDIO_EXTS = {".ogg", ".opus", ".mp3", ".wav", ".m4a", ".flac", ".silk"}
         _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".3gp"}
         _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 
@@ -1794,9 +1920,28 @@ class WeixinAdapter(BasePlatformAdapter):
         if not self._send_session or not self._token:
             return SendResult(success=False, error="Not connected")
 
-        # Native outbound Weixin voice bubbles are not proven-working in the
-        # upstream reference implementation. Prefer a reliable file attachment
-        # fallback so users at least receive playable audio, even for .silk.
+        # Convert non-.silk audio to .silk for native voice bubble rendering
+        if not audio_path.lower().endswith(".silk"):
+            silk_path = _convert_to_silk(audio_path)
+            if silk_path:
+                audio_path = silk_path
+
+        # .silk files can use native voice bubbles via the voice_item path.
+        # Other formats fall back to file attachment since native voice
+        # encoding is not available upstream.
+        is_silk = audio_path.lower().endswith(".silk")
+        if is_silk:
+            try:
+                message_id = await self._send_file(
+                    chat_id,
+                    audio_path,
+                    caption,
+                    force_file_attachment=False,
+                )
+                return SendResult(success=True, message_id=message_id)
+            except Exception as exc:
+                logger.error("[%s] send_voice (silk native) failed to=%s: %s", self.name, _safe_id(chat_id), exc)
+                # fall through to file attachment as last resort
         fallback_caption = caption or "[voice message as attachment]"
         try:
             message_id = await self._send_file(
@@ -1887,6 +2032,10 @@ class WeixinAdapter(BasePlatformAdapter):
             item_kwargs["encode_type"] = 6
             item_kwargs["sample_rate"] = 24000
             item_kwargs["bits_per_sample"] = 16
+            # Calculate playtime from SILK frames (each frame = 20ms)
+            playtime = _silk_duration_ms(plaintext)
+            if playtime > 0:
+                item_kwargs["playtime"] = playtime
         media_item = item_builder(**item_kwargs)
 
         last_message_id = None
@@ -2042,6 +2191,8 @@ async def send_weixin_direct(
             ext = Path(media_path).suffix.lower()
             if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
                 last_result = await live_adapter.send_image_file(chat_id, media_path)
+            elif ext == ".silk" or ext in {".ogg", ".mp3", ".wav", ".m4a", ".opus"}:
+                last_result = await live_adapter.send_voice(chat_id, media_path)
             else:
                 last_result = await live_adapter.send_document(chat_id, media_path)
             if not last_result.success:
@@ -2087,6 +2238,8 @@ async def send_weixin_direct(
             ext = Path(media_path).suffix.lower()
             if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
                 last_result = await adapter.send_image_file(chat_id, media_path)
+            elif ext == ".silk" or ext in {".ogg", ".mp3", ".wav", ".m4a", ".opus"}:
+                last_result = await adapter.send_voice(chat_id, media_path)
             else:
                 last_result = await adapter.send_document(chat_id, media_path)
             if not last_result.success:

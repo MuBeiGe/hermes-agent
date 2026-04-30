@@ -728,6 +728,97 @@ def _convert_to_opus(mp3_path: str) -> Optional[str]:
     return None
 
 
+# SILK_WASM_PATH: silk-wasm module bundled with OpenClaw (QQ/WeChat voice codec)
+_SILK_WASM_CANDIDATES = [
+    # OpenClaw global install (Windows)
+    "/mnt/c/Users/BYYG/AppData/Roaming/npm/node_modules/openclaw/dist/extensions/qqbot/node_modules/silk-wasm",
+]
+
+
+def _find_silk_wasm() -> Optional[str]:
+    """Locate the silk-wasm Node.js module."""
+    for path in _SILK_WASM_CANDIDATES:
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+def _convert_to_silk(audio_path: str) -> Optional[str]:
+    """
+    Convert any audio file to SILK format for WeChat native voice bubbles.
+
+    Pipeline: audio → WAV (24kHz/16bit/mono via ffmpeg) → SILK (via silk-wasm).
+
+    Args:
+        audio_path: Path to the input audio file (MP3, WAV, OGG, etc.)
+
+    Returns:
+        Path to the .silk file, or None if conversion fails.
+    """
+    silk_wasm_dir = _find_silk_wasm()
+    if not silk_wasm_dir:
+        logger.warning("silk-wasm not found — SILK conversion skipped for WeChat voice")
+        return None
+
+    if not _has_ffmpeg():
+        logger.warning("ffmpeg not found — cannot convert to SILK")
+        return None
+
+    silk_path = audio_path.rsplit(".", 1)[0] + ".silk"
+
+    # Step 1: Convert to WAV (24kHz, 16-bit, mono) — required by silk-wasm
+    wav_path = audio_path.rsplit(".", 1)[0] + "_tmp.wav"
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", audio_path, "-ar", "24000", "-ac", "1",
+             "-sample_fmt", "s16", wav_path, "-y"],
+            capture_output=True, timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning("ffmpeg→WAV failed (rc=%d): %s",
+                          result.returncode,
+                          result.stderr.decode("utf-8", errors="ignore")[:200])
+            return None
+
+        # Step 2: WAV → SILK via silk-wasm (Node.js)
+        js_code = f"""
+const {{ encode }} = require({json.dumps(silk_wasm_dir)});
+const fs = require('fs');
+async function main() {{
+    const wav = fs.readFileSync({json.dumps(wav_path)});
+    const result = await encode(wav, 0);
+    fs.writeFileSync({json.dumps(silk_path)}, result.data);
+}}
+main().catch(e => {{ console.error(e.message); process.exit(1); }});
+"""
+        result = subprocess.run(
+            ["node", "-e", js_code],
+            capture_output=True, timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning("silk-wasm encode failed: %s",
+                          result.stderr.decode("utf-8", errors="ignore")[:200])
+            return None
+
+        if os.path.exists(silk_path) and os.path.getsize(silk_path) > 0:
+            return silk_path
+
+    except subprocess.TimeoutExpired:
+        logger.warning("SILK conversion timed out")
+    except FileNotFoundError as e:
+        logger.warning("SILK conversion dependency missing: %s", e)
+    except Exception as e:
+        logger.warning("SILK conversion failed: %s", e, exc_info=True)
+    finally:
+        # Clean up temp WAV
+        try:
+            os.unlink(wav_path)
+        except OSError:
+            pass
+
+    return None
+
+
 # ===========================================================================
 # Provider: Edge TTS (free)
 # ===========================================================================
@@ -1586,6 +1677,7 @@ def text_to_speech_tool(
     from gateway.session_context import get_session_env
     platform = get_session_env("HERMES_SESSION_PLATFORM", "").lower()
     want_opus = (platform == "telegram")
+    want_silk = (platform == "weixin")
 
     # Determine output path
     if output_path:
@@ -1606,6 +1698,9 @@ def text_to_speech_tool(
             file_path = out_dir / f"tts_{timestamp}.{fmt}"
         # Use .ogg for Telegram with providers that support native Opus output,
         # otherwise fall back to .mp3 (Edge TTS will attempt ffmpeg conversion later).
+        if want_silk:
+            # WeChat needs SILK format — generate MP3 first, convert later
+            file_path = out_dir / f"tts_{timestamp}.mp3"
         elif want_opus and provider in ("openai", "elevenlabs", "mistral", "gemini"):
             file_path = out_dir / f"tts_{timestamp}.ogg"
         else:
@@ -1746,6 +1841,11 @@ def text_to_speech_tool(
         # Try Opus conversion for Telegram compatibility
         # Edge TTS outputs MP3, NeuTTS/KittenTTS output WAV — all need ffmpeg conversion
         voice_compatible = False
+        if want_silk:
+            silk_path = _convert_to_silk(file_str)
+            if silk_path:
+                file_str = silk_path
+                voice_compatible = True
         if command_provider_config is not None:
             # Command providers are documents by default. Voice-bubble
             # delivery only kicks in when the user explicitly opts in

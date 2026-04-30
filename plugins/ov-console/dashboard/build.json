@@ -1,0 +1,19 @@
+{
+  "name": "ov-console-dashboard",
+  "version": "2.1.0",
+  "description": "OV Console Dashboard Plugin — React components",
+  "sources": [
+    "src/00_sdk.js",
+    "src/icons.js",
+    "src/shared.js",
+    "src/DashboardTab.js",
+    "src/BrowseTab.js",
+    "src/SearchTab.js",
+    "src/App.js"
+  ],
+  "output": "dist/index.js",
+  "wrapper": {
+    "prefix": "(function() {\n  \"use strict\";\n",
+    "suffix": "\n  window.__HERMES_PLUGINS__.register(\"ov-console\", App);\n})();\n"
+  }
+}

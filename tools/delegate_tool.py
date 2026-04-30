@@ -1818,6 +1818,8 @@ def delegate_task(
     acp_command: Optional[str] = None,
     acp_args: Optional[List[str]] = None,
     role: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
     parent_agent=None,
 ) -> str:
     """
@@ -1890,6 +1892,22 @@ def delegate_task(
         creds = _resolve_delegation_credentials(cfg, parent_agent)
     except ValueError as exc:
         return tool_error(str(exc))
+
+    # Per-call provider/model override: when the caller specifies a provider
+    # (e.g. "deepseek" for a literary task), re-resolve credentials for that
+    # provider instead of using the global delegation config.  This allows
+    # routing specific subagents to a different model without changing the
+    # default for all subagents.
+    if provider or model:
+        try:
+            override_cfg = dict(cfg)
+            if provider:
+                override_cfg["provider"] = provider
+            if model:
+                override_cfg["model"] = model
+            creds = _resolve_delegation_credentials(override_cfg, parent_agent)
+        except ValueError as exc:
+            return tool_error(f"Cannot resolve override provider={provider!r} model={model!r}: {exc}")
 
     # Normalize to task list
     max_children = _get_max_concurrent_children()
@@ -2502,6 +2520,23 @@ DELEGATE_TASK_SCHEMA = {
                     "Only used when acp_command is set. Example: ['--acp', '--stdio', '--model', 'claude-opus-4-6']"
                 ),
             },
+            "provider": {
+                "type": "string",
+                "description": (
+                    "Override the subagent's LLM provider (e.g. 'deepseek', 'minimax-cn'). "
+                    "When set, credentials are resolved for this provider instead of using "
+                    "the global delegation config. Use to route specific tasks to a stronger "
+                    "model without changing the default for all subagents."
+                ),
+            },
+            "model": {
+                "type": "string",
+                "description": (
+                    "Override the subagent's model name (e.g. 'deepseek-v4-pro'). "
+                    "Only meaningful when used together with 'provider'. "
+                    "When omitted but 'provider' is set, the provider's default_model is used."
+                ),
+            },
         },
         "required": [],
     },
@@ -2524,6 +2559,8 @@ registry.register(
         acp_command=args.get("acp_command"),
         acp_args=args.get("acp_args"),
         role=args.get("role"),
+        provider=args.get("provider"),
+        model=args.get("model"),
         parent_agent=kw.get("parent_agent"),
     ),
     check_fn=check_delegate_requirements,

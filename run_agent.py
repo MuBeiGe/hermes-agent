@@ -10806,6 +10806,7 @@ class AIAgent:
             thinking_sig_retry_attempted = False
             image_shrink_retry_attempted = False
             oauth_1m_beta_retry_attempted = False
+            minimax_400_dump_done = False
             has_retried_429 = False
             restart_with_compressed_messages = False
             restart_with_length_continuation = False
@@ -11895,6 +11896,44 @@ class AIAgent:
                             self.log_prefix, len(messages),
                         )
                         continue
+
+                    # ── MiniMax 400 diagnostic (Patch006: 2026-04-26) ────
+                    # MiniMax rejects its own malformed tool_call JSON when
+                    # passed back in conversation history.  Capture the full
+                    # error body to surface the exact tool_call_id/arguments
+                    # that caused the rejection.  See errors.log 2026-04-19
+                    # for the original incident (tool_call_id 2013).
+                    if (
+                        self.provider in ("minimax-cn", "minimax")
+                        and status_code == 400
+                        and not minimax_400_dump_done
+                    ):
+                        minimax_400_dump_done = True
+                        _mm_body = ""
+                        try:
+                            _mm_resp = getattr(api_error, "response", None)
+                            if _mm_resp is not None:
+                                _mm_body = str(
+                                    getattr(_mm_resp, "text", "") or ""
+                                )[:2000]
+                            if not _mm_body:
+                                _mm_body = str(
+                                    getattr(api_error, "body", "") or ""
+                                )[:2000]
+                        except Exception:
+                            _mm_body = str(api_error)[:500]
+                        logging.warning(
+                            "MiniMax 400 diagnostic | provider=%s model=%s "
+                            "status=%s messages=%d tokens=%d error_body=%s",
+                            self.provider, self.model, status_code,
+                            len(messages), approx_tokens, _mm_body,
+                        )
+                        if api_kwargs is not None:
+                            self._dump_api_request_debug(
+                                api_kwargs,
+                                reason="minimax_400_diagnostic",
+                                error=api_error,
+                            )
 
                     retry_count += 1
                     elapsed_time = time.time() - api_start_time

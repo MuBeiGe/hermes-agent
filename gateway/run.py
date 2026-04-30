@@ -11118,6 +11118,20 @@ class GatewayRunner:
             except Exception:
                 pass
 
+            # Re-apply config.yaml settings that must survive .env reloads.
+            # max_turns is authoritative in config.yaml — override any .env value.
+            try:
+                _cfg_path = _hermes_home / 'config.yaml'
+                if _cfg_path.exists():
+                    import yaml as _yaml_reload
+                    with open(_cfg_path, encoding='utf-8') as _f:
+                        _cfg = _yaml_reload.safe_load(_f) or {}
+                    _agent_cfg = _cfg.get('agent', {})
+                    if isinstance(_agent_cfg, dict) and 'max_turns' in _agent_cfg:
+                        os.environ['HERMES_MAX_ITERATIONS'] = str(_agent_cfg['max_turns'])
+            except Exception:
+                pass
+
             try:
                 model, runtime_kwargs = self._resolve_session_agent_runtime(
                     source=source,
