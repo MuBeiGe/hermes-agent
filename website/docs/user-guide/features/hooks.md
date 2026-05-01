@@ -457,7 +457,7 @@ Fires **immediately after** every tool execution returns.
 
 ```python
 def my_callback(tool_name: str, args: dict, result: str, task_id: str,
-                duration_ms: int, **kwargs):
+                duration_ms: int, success: bool, **kwargs):
 ```
 
 | Parameter | Type | Description |
@@ -467,6 +467,7 @@ def my_callback(tool_name: str, args: dict, result: str, task_id: str,
 | `result` | `str` | The tool's return value (always a JSON string) |
 | `task_id` | `str` | Session/task identifier. Empty string if not set. |
 | `duration_ms` | `int` | How long the tool's dispatch took, in milliseconds (measured with `time.monotonic()` around `registry.dispatch()`). |
+| `success` | `bool` | `True` if the tool call succeeded, `False` if the result contains an `"error"` key. Quick heuristic based on hermes's `{"error": "..."}` error-wrapping convention — plugins can still inspect `result` for tool-specific details. |
 
 **Fires:** In `model_tools.py`, inside `handle_function_call()`, after the tool's handler returns. Fires once per tool call. Does **not** fire if the tool raised an unhandled exception (the error is caught and returned as an error JSON string instead, and `post_tool_call` fires with that error string as `result`).
 
@@ -478,21 +479,16 @@ def my_callback(tool_name: str, args: dict, result: str, task_id: str,
 
 ```python
 from collections import Counter, defaultdict
-import json
 
 _tool_counts = Counter()
 _error_counts = Counter()
 _latency_ms = defaultdict(list)
 
-def track_metrics(tool_name, result, duration_ms=0, **kwargs):
+def track_metrics(tool_name, duration_ms=0, success=True, **kwargs):
     _tool_counts[tool_name] += 1
     _latency_ms[tool_name].append(duration_ms)
-    try:
-        parsed = json.loads(result)
-        if "error" in parsed:
-            _error_counts[tool_name] += 1
-    except (json.JSONDecodeError, TypeError):
-        pass
+    if not success:
+        _error_counts[tool_name] += 1
 
 def register(ctx):
     ctx.register_hook("post_tool_call", track_metrics)

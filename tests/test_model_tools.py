@@ -72,6 +72,7 @@ class TestHandleFunctionCall:
                 session_id="session-1",
                 tool_call_id="call-1",
                 duration_ms=ANY,
+                success=True,
             ),
             call(
                 "transform_tool_result",

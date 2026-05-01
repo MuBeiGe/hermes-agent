@@ -736,6 +736,13 @@ def handle_function_call(
 
         try:
             from hermes_cli.plugins import invoke_hook
+            # Quick success check: hermes wraps all errors as {"error": "..."}.
+            # Plugins can still inspect `result` for tool-specific details.
+            try:
+                _parsed = json.loads(result) if isinstance(result, str) else result
+                _success = not (isinstance(_parsed, dict) and "error" in _parsed)
+            except (json.JSONDecodeError, TypeError):
+                _success = True
             invoke_hook(
                 "post_tool_call",
                 tool_name=function_name,
@@ -745,6 +752,7 @@ def handle_function_call(
                 session_id=session_id or "",
                 tool_call_id=tool_call_id or "",
                 duration_ms=duration_ms,
+                success=_success,
             )
         except Exception:
             pass
